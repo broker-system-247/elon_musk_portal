@@ -19,7 +19,7 @@ const userSessions = new Map();
 
 // API Routes
 app.get('/api', (req, res) => {
-    res.send('Elon Musk Portal API is running! 🚀');
+    res.json({ status: 'Elon Musk Portal API is running! 🚀', timestamp: new Date().toISOString() });
 });
 
 // Send message to Telegram
@@ -55,7 +55,7 @@ app.post('/api/send-message', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Error sending to Telegram:', error.message);
         res.status(500).json({ 
             success: false, 
             error: 'Failed to send message. Please try again.' 
@@ -63,7 +63,7 @@ app.post('/api/send-message', async (req, res) => {
     }
 });
 
-// Check for replies
+// Check for replies from Telegram
 app.get('/api/check-reply/:sessionId', (req, res) => {
     const session = userSessions.get(req.params.sessionId);
     
@@ -94,11 +94,17 @@ app.post('/api/webhook', async (req, res) => {
                 userSession.replied = true;
                 userSession.reply = message.text;
                 userSession.replyTime = Date.now();
+                console.log(`Reply received for session ${sessionId}: ${message.text}`);
             }
         }
     }
     
     res.sendStatus(200);
+});
+
+// IMPORTANT: Serve index.html for root route
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Serve index.html for all other routes (SPA support)
@@ -109,4 +115,5 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌐 Website: https://elon-musk-portal.onrender.com`);
 });
