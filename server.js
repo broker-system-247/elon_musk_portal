@@ -6,35 +6,31 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-// Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Your Telegram credentials from environment variables
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-// Store messages for two-way communication
 const userSessions = new Map();
+const messageHistory = new Map();
 
-// API Routes
+// Health check
 app.get('/api', (req, res) => {
-    res.json({ status: 'Elon Musk Portal API is running! 🚀', timestamp: new Date().toISOString() });
+    res.json({ status: 'Elon Musk Portal API Running', timestamp: new Date() });
 });
 
 // Send message to Telegram
 app.post('/api/send-message', async (req, res) => {
-    const { message, userName, userEmail } = req.body;
-    const sessionId = Date.now().toString();
+    const { message, userId, userName } = req.body;
+    const sessionId = userId || Date.now().toString();
     
     try {
         const text = `🚀 *NEW MESSAGE FROM PORTAL*\n\n` +
-                    `👤 *From:* ${userName || 'Anonymous'}\n` +
-                    `📧 *Email:* ${userEmail || 'Not provided'}\n` +
-                    `🆔 *Session:* ${sessionId}\n\n` +
+                    `👤 *From:* ${userName || 'Fan'}\n` +
+                    `🆔 *ID:* ${sessionId}\n\n` +
                     `💬 *Message:*\n${message}\n\n` +
                     `─────────────────────\n` +
-                    `Reply to this message to respond to the user.`;
+                    `Reply to this message to respond.`;
         
         await axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
             chat_id: CHAT_ID,
@@ -42,78 +38,106 @@ app.post('/api/send-message', async (req, res) => {
             parse_mode: 'Markdown'
         });
         
+        // Store message
+        if (!messageHistory.has(sessionId)) {
+            messageHistory.set(sessionId, []);
+        }
+        messageHistory.get(sessionId).push({
+            type: 'user',
+            text: message,
+            time: Date.now()
+        });
+        
         userSessions.set(sessionId, {
-            timestamp: Date.now(),
-            message: message,
+            lastMessage: Date.now(),
             replied: false
         });
         
         res.json({ 
             success: true, 
             sessionId: sessionId,
-            message: 'Message sent to Elon successfully!'
+            autoReply: "✅ Message delivered to Elon's Telegram! He typically responds within 2-4 hours. Your conversation is saved and secure."
         });
         
     } catch (error) {
-        console.error('Error sending to Telegram:', error.message);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Failed to send message. Please try again.' 
-        });
+        console.error('Error:', error);
+        res.status(500).json({ success: false, error: 'Failed to send' });
     }
 });
 
-// Check for replies from Telegram
-app.get('/api/check-reply/:sessionId', (req, res) => {
-    const session = userSessions.get(req.params.sessionId);
+// Get chat history
+app.get('/api/history/:userId', (req, res) => {
+    const history = messageHistory.get(req.params.userId) || [];
+    res.json({ history });
+});
+
+// Check for replies (long polling)
+app.get('/api/check-reply/:userId', (req, res) => {
+    const session = userSessions.get(req.params.userId);
+    const history = messageHistory.get(req.params.userId) || [];
     
-    if (session && session.replied) {
-        res.json({
-            hasReply: true,
-            reply: session.reply,
-            replyTime: session.replyTime
-        });
+    // Find Elon's replies that haven't been delivered
+    const pendingReplies = history.filter(m => m.type === 'elon' && !m.delivered);
+    
+    if (pendingReplies.length > 0) {
+        pendingReplies.forEach(m => m.delivered = true);
+        res.json({ hasReply: true, replies: pendingReplies });
     } else {
         res.json({ hasReply: false });
     }
 });
 
-// Webhook for Telegram replies
+// Telegram webhook for replies
 app.post('/api/webhook', async (req, res) => {
     const { message } = req.body;
     
-    if (message && message.reply_to_message) {
+    if (message && message.reply_to_message && message.from.id.toString() === CHAT_ID) {
         const originalText = message.reply_to_message.text;
-        const sessionMatch = originalText.match(/🆔 \*Session:\* (\d+)/);
+        const idMatch = originalText.match(/🆔 \*ID:\* (\d+)/);
         
-        if (sessionMatch) {
-            const sessionId = sessionMatch[1];
-            const userSession = userSessions.get(sessionId);
+        if (idMatch) {
+            const userId = idMatch[1];
             
-            if (userSession) {
-                userSession.replied = true;
-                userSession.reply = message.text;
-                userSession.replyTime = Date.now();
-                console.log(`Reply received for session ${sessionId}: ${message.text}`);
+            if (!messageHistory.has(userId)) {
+                messageHistory.set(userId, []);
             }
+            
+            messageHistory.get(userId).push({
+                type: 'elon',
+                text: message.text,
+                time: Date.now(),
+                delivered: false
+            });
+            
+            // Also update session
+            userSessions.set(userId, {
+                lastMessage: Date.now(),
+                replied: true,
+                lastReply: message.text
+            });
+            
+            console.log(`Reply stored for user ${userId}: ${message.text}`);
         }
     }
     
     res.sendStatus(200);
 });
 
-// IMPORTANT: Serve index.html for root route
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Store user ID mapping
+app.post('/api/register-user', (req, res) => {
+    const { userId } = req.body;
+    if (!messageHistory.has(userId)) {
+        messageHistory.set(userId, []);
+    }
+    res.json({ success: true });
 });
 
-// Serve index.html for all other routes (SPA support)
+// Serve frontend
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌐 Website: https://elon-musk-portal.onrender.com`);
+    console.log(`🚀 Server running on https://elon-musk-portal.onrender.com`);
 });
