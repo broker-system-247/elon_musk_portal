@@ -1,24 +1,18 @@
-
-# Create package.json
-package_json = '''{
+{
   "name": "elon-musk-portal",
   "version": "1.0.0",
-  "description": "Elon Musk Fan Portal with Telegram Chat",
+  "description": "Official Elon Musk Fan Portal with Telegram Integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
+    "axios": "^1.6.0",
     "cors": "^2.8.5",
-    "body-parser": "^1.20.2",
-    "axios": "^1.6.2",
-    "dotenv": "^16.3.1"
+    "form-data": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
-'''
-
-with open('/mnt/kimi/output/package.json', 'w') as f:
-    f.write(package_json)
-
-print("✅ package.json created")
